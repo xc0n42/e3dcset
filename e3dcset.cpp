@@ -41,6 +41,7 @@ static bool automatischLeistungEinstellen = false;
 static bool ladeLeistungGesetzt = false;
 static bool entladeLeistungGesetzt = false;
 static bool manuelleSpeicherladung = false;
+static int powersave = -1;
 
 static uint32_t ladungsMenge = 0;
 static uint32_t ladeLeistung = 0;
@@ -77,14 +78,29 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 
     }else{
 
-    	if (manuelleSpeicherladung){
+        if (manuelleSpeicherladung){
     		protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE, ladungsMenge);
-    	}
+        }
 
-    	if (leistungAendern){
 
-    		SRscpValue PMContainer;
-    		protocol.createContainerValue(&PMContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
+        if (leistungAendern){
+
+            SRscpValue PMContainer;
+            protocol.createContainerValue(&PMContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
+
+            if (powersave >= 0)
+            {
+                if (powersave == 0)
+                {
+                    printf("Schalte Power-Save aus\n");
+                    protocol.appendValue(&PMContainer, TAG_EMS_POWERSAVE_ENABLED, (unsigned char)0);
+                }
+                else if (powersave == 1)
+                {
+                    printf("Schalte Power-Save ein\n");
+                    protocol.appendValue(&PMContainer, TAG_EMS_POWERSAVE_ENABLED, (unsigned char)1);
+                }
+            }
 
             if (automatischLeistungEinstellen){
 
@@ -508,7 +524,7 @@ static void mainLoop(void)
 }
 
 void usage(void){
-    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei]\n\n");
+    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-s 0=powersave off,1=powersave on] [-p Pfad zur Konfigurationsdatei]\n\n");
     exit(EXIT_FAILURE);
 }
 
@@ -662,7 +678,7 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:d:e:ap:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:d:s:e:ap:")) != -1) {
 
     	switch (opt) {
 
@@ -687,7 +703,10 @@ int main(int argc, char *argv[])
         case 'p':
         	config = strdup(optarg);
         	break;
-		default:
+        case 's':
+            powersave = atoi(optarg);
+            break;
+        default:
         	usage();
 
         }
