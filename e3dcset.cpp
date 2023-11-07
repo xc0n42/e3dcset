@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <errno.h>
 #include <unistd.h>
 #include "RscpProtocol.h"
@@ -36,18 +37,11 @@ static AES aesDecrypter;
 static uint8_t ucEncryptionIV[AES_BLOCK_SIZE];
 static uint8_t ucDecryptionIV[AES_BLOCK_SIZE];
 
-static bool leistungAendern = false;
-static bool automatischLeistungEinstellen = false;
-static bool ladeLeistungGesetzt = false;
-static bool entladeLeistungGesetzt = false;
-static bool manuelleSpeicherladung = false;
 static int powersave = -1;
 static uint32_t powerValue = -1;
-
-static uint32_t ladungsMenge = 0;
-static uint32_t ladeLeistung = 0;
-static uint32_t entladeLeistung = 0;
-
+static uint8_t powerMode = -1;
+static time_t timeout = -1;
+static time_t now = time(NULL);
 
 static e3dc_config_t e3dc_config;
 
@@ -56,7 +50,7 @@ static bool debug = false;
 static char *config = strdup("e3dcset.config");
 
 
-int createRequestExample(SRscpFrameBuffer * frameBuffer) {
+int createRequest(SRscpFrameBuffer * frameBuffer) {
     RscpProtocol protocol;
     SRscpValue rootValue;
     // The root container is create with the TAG ID 0 which is not used by any device.
@@ -79,115 +73,39 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 
     }else{
 
-        if (powerValue == 0) {
-            printf("Setze Lademodus auf Automatik\n");
-            SRscpValue SetPowerContainer;
-            protocol.createContainerValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER);
-            SRscpValue SetPowerSettingsContainer;
-            protocol.createContainerValue(&SetPowerSettingsContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
-            protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_POWER_LIMITS_USED, false);
-            protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_MODE, (unsigned char)0);
-            protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_VALUE, (u_int32_t)0);
-            protocol.appendValue(&rootValue, SetPowerContainer);
-            protocol.destroyValueData(SetPowerContainer);
-            protocol.appendValue(&rootValue, SetPowerSettingsContainer);
-            protocol.destroyValueData(SetPowerSettingsContainer);
-            
-            manuelleSpeicherladung = false;
-            leistungAendern = false;
-        }
-        else if (powerValue > 0)
-        {
-            printf("Setze manuelles Laden\n");
-            SRscpValue SetPowerContainer;
-            protocol.createContainerValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER);
-            SRscpValue SetPowerSettingsContainer;
-            protocol.createContainerValue(&SetPowerSettingsContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
-            protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_MODE, (unsigned char)4);
-            protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_VALUE, powerValue);
-            protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_POWER_LIMITS_USED, true);
-            protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_MAX_CHARGE_POWER, powerValue);
-            protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_MAX_DISCHARGE_POWER, (uint32_t)1);
-
-            protocol.appendValue(&rootValue, SetPowerContainer);
-            protocol.destroyValueData(SetPowerContainer);
-            protocol.appendValue(&rootValue, SetPowerSettingsContainer);
-            protocol.destroyValueData(SetPowerSettingsContainer);
-
-            manuelleSpeicherladung = false;
-            leistungAendern = false;
+        if (powerValue >= 0 && powerMode >= 0) {
+            switch (powerMode) {
+                case 0:
+                case 1:
+                case 2:
+                case 3:
+                case 4:
+                    SRscpValue SetPowerContainer;
+                    protocol.createContainerValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER);
+                    protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_MODE, powerMode);
+                    protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_VALUE, powerValue);
+                    protocol.appendValue(&rootValue, SetPowerContainer);
+                    protocol.destroyValueData(SetPowerContainer);
+                    break;
+                default:
+                    break;
+            }
         }
 
-        if (manuelleSpeicherladung)
-        {
-            printf("Setze manuelle Speicherladung\n");
-            SRscpValue SetPowerContainer;
-            protocol.createContainerValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER);
-            protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_MODE, (unsigned char)4);
-            protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_VALUE, ladungsMenge);
-            protocol.appendValue(&rootValue, SetPowerContainer);
-            protocol.destroyValueData(SetPowerContainer);
-            protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE, ladungsMenge);
-        }
-
-        if (leistungAendern){
-
+        if (powersave >= 0) {
             SRscpValue SetPowerSettingsContainer;
             protocol.createContainerValue(&SetPowerSettingsContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
-
-            if (powersave >= 0)
-            {
-                if (powersave == 0)
-                {
-                    printf("Schalte Power-Save aus\n");
-                    protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_POWERSAVE_ENABLED, (unsigned char)0);
-                }
-                else if (powersave == 1)
-                {
-                    printf("Schalte Power-Save ein\n");
-                    protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_POWERSAVE_ENABLED, (unsigned char)1);
-                }
+            if (powersave == 0) {
+                printf("Switching off power-save\n");
+                protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_POWERSAVE_ENABLED, (unsigned char)0);
+            } else if (powersave == 1) {
+                printf("Switching on power-save\n");
+                protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_POWERSAVE_ENABLED, (unsigned char)1);
             }
-
-            if (automatischLeistungEinstellen){
-
-              printf("Setze Lade-/EntladeLeistung auf Automatik\n");
-              SRscpValue SetPowerContainer;
-              protocol.createContainerValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER);
-              protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_POWER_LIMITS_USED, false);
-              protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_MODE, (unsigned char)0);
-              protocol.appendValue(&SetPowerContainer, TAG_EMS_REQ_SET_POWER_VALUE, (u_int32_t)0);
-              protocol.appendValue(&rootValue, SetPowerContainer);
-              protocol.destroyValueData(SetPowerContainer);
-            }
-
-            if (ladeLeistungGesetzt || entladeLeistungGesetzt){
-
-              printf("Setze manuelle Speicherlimits\n");
-              protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_POWER_LIMITS_USED, true);
-
-              if (ladeLeistungGesetzt){
-
-                printf("Setze LadeLeistung auf %iW\n",ladeLeistung);
-                protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_MAX_CHARGE_POWER, ladeLeistung);
-
-              }
-
-              if (entladeLeistungGesetzt){
-
-                printf("Setze EntladeLeistung auf %iW\n",entladeLeistung);
-                protocol.appendValue(&SetPowerSettingsContainer, TAG_EMS_MAX_DISCHARGE_POWER, entladeLeistung);
-
-              }
-
-            }
-
-          	// append sub-container to root container
             protocol.appendValue(&rootValue, SetPowerSettingsContainer);
-            // free memory of sub-container as it is now copied to rootValue
             protocol.destroyValueData(SetPowerSettingsContainer);
-
-    	}
+        }
+    	
 
     }
 
@@ -222,17 +140,10 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         break;
     }
     case TAG_EMS_START_MANUAL_CHARGE: {
-
         if (protocol->getValueAsBool(response)){
-
-        	if (ladungsMenge == 0){
-        		printf("Manuelles Laden gestoppt\n");
-        	}else{
-        		printf("Manuelles Laden gestartet\n");
-        	}
-
+            printf("Manual charge set.\n");
         }else{
-          printf("Manuelles Laden abgeleht.\n");
+            printf("Manual charge declined.\n");
         }
 	break;
     } 
@@ -534,7 +445,7 @@ static void mainLoop(void)
         memset(&frameBuffer, 0, sizeof(frameBuffer));
 
         // create an RSCP frame with requests to some example data
-        createRequestExample(&frameBuffer);
+        createRequest(&frameBuffer);
 
         // check that frame data was created
         if(frameBuffer.dataLength > 0)
@@ -562,22 +473,27 @@ static void mainLoop(void)
             else {
                 // go into receive loop and wait for response
                 receiveLoop(bStopExecution);
-                if (counter > 0) bStopExecution = true; // #MS# end program after first receive
+                if (
+                    (now + (timeout*60) < time(NULL)) ||
+                    (timeout == -1 && counter > 0)
+                ) {
+                    bStopExecution = true;
+                }
             }
         }
         // free frame buffer memory
         protocol.destroyFrameData(&frameBuffer);
 
         // main loop sleep / cycle time before next request
-        sleep(1);
+        sleep(5);
 
-	counter++;
+	    counter++;
 
     }
 }
 
 void usage(void){
-    fprintf(stderr, "\n   Usage: e3dcset [-m mode: 0=auto,1=idle,2=discharge,3=charge] [-p charge/discharge value] [-t runtime in minutes] [-s 0=powersave off,1=powersave on] [-p Pfad zur Konfigurationsdatei]\n\n");
+    fprintf(stderr, "\n   Usage: e3dcset [-m mode: 0=auto,1=idle,2=discharge,3=charge,4=grid charge] [-v charge/discharge value] [-t runtime in minutes] [-s 0=powersave off,1=powersave on] [-p Pfad zur Konfigurationsdatei]\n\n");
     exit(EXIT_FAILURE);
 }
 
@@ -656,30 +572,12 @@ void readConfig(void){
 
 void checkArguments(void){
 
-    if (ladeLeistungGesetzt && (ladeLeistung < 0 || ladeLeistung < e3dc_config.MIN_LEISTUNG || ladeLeistung > e3dc_config.MAX_LEISTUNG)){
-    	fprintf(stderr, "[-c ladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
-    	exit(EXIT_FAILURE);
-    }
-
-    if (entladeLeistungGesetzt && (entladeLeistung < 0 || entladeLeistung < e3dc_config.MIN_LEISTUNG || entladeLeistung > e3dc_config.MAX_LEISTUNG)){
-    	fprintf(stderr, "[-d entladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
-    	exit(EXIT_FAILURE);
-    }
-
-    if (automatischLeistungEinstellen && (entladeLeistung > 0 || ladeLeistung > 0)){
-    	fprintf(stderr, "bei Lade/Entladeleistung Automatik [-a] duerfen [-c ladeLeistung] und [-d entladeLeistung] nicht gesetzt sein\n\n");
-    	exit(EXIT_FAILURE);
-    }
-
-    if (manuelleSpeicherladung && (ladungsMenge < e3dc_config.MIN_LADUNGSMENGE || ladungsMenge > e3dc_config.MAX_LADUNGSMENGE)){
-    	fprintf(stderr, "Fuer die manuelle Speicherladung muss der angegebene Wert zwischen %iWh und %iWh liegen\n\n",e3dc_config.MIN_LADUNGSMENGE,e3dc_config.MAX_LADUNGSMENGE);
-    	exit(EXIT_FAILURE);
-    }
-
+    /*
     if (!leistungAendern && !manuelleSpeicherladung && powerValue == -1){
         fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
         exit(EXIT_FAILURE);
     }
+    */
 
 }
 
@@ -731,40 +629,27 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "m:c:d:s:e:ap:")) != -1) {
+    while ((opt = getopt(argc, argv, "m:p:v:t:s:")) != -1) {
 
     	switch (opt) {
-
-    	case 'c':
-    		leistungAendern = true;
-    		ladeLeistungGesetzt = true;
-        	ladeLeistung = atoi(optarg);
-        	break;
-        case 'd':
-        	leistungAendern = true;
-            entladeLeistungGesetzt = true;
-        	entladeLeistung = atoi(optarg);
-        	break;
-        case 'e':
-        	manuelleSpeicherladung = true;
-        	ladungsMenge = atoi(optarg);
-        	break;
-        case 'a':
-        	leistungAendern = true;
-        	automatischLeistungEinstellen = true;
-        	break;
-        case 'p':
-        	config = strdup(optarg);
-        	break;
-        case 's':
-            powersave = atoi(optarg);
-            break;
-        case 'm':
-            powerValue = atoi(optarg);
-            break;
-        default:
-        	usage();
-
+            case 't':
+                timeout = atoi(optarg);
+                break;
+            case 'm':
+                powerMode = atoi(optarg);
+                break;
+            case 'v':
+                powerValue = atoi(optarg);
+                break;
+            case 's':
+                powersave = atoi(optarg);
+                timeout = -1;
+                break;
+            case 'p':
+                config = strdup(optarg);
+                break;
+            default:
+                usage();
         }
     }
 
