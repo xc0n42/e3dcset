@@ -1,32 +1,21 @@
 # e3dcset
 
+Dieses Kommandozeilen Tool basiert auf dem [Code von mschlappa](https://github.com/mschlappa/e3dcset.git)
 
-Mit diesem Linux Kommandozeilen Tool können einige Funktionen des S10 Hauskraftwerkes von E3DC über das RSCP Protokoll gesteuert werden. Dies sind:
+E3/DC beschränkt die Funktion des manuellen Ladens auf eine einmalige Ausführung am Tag. Ein nächtliches Laden aus dem Netz bei leerem Akku war mit dem RSCP Tag START_MANUAL_CHARGE nicht möglich. 
 
-- Lade-/Entladeleistung des Speichers ändern
-- Zurückschalten der Lade-/Entladeleistung auf Automatik
-- Manuelle Speicherladung mit einer bestimmten Energiemenge starten (ggf. auch mit Netzstrom)
-- Laufende manuelle Speicherladung stoppen
+Mit dem RSCP Tag REQ_SET_POWER_MODE lässt sich die E3DC für einige Sekunden in einen spezifischen Power-Mode schalten, daher läuft dieses Tool für die mit dem Parameter `-t` angegebene Zeit in Minuten. Dabei wird der Request alle 5 Sekunden an die E3/DC geschickt. Wird das Programm beendet, schaltet die E3/DC automatisch zurück in den Normalmodus.
 
-Das Programm basiert auf dem von E3DC zur Verfügung gestellten Beispielprogramm sowie 
-einigen Codestellen aus dem Tool [E3DC-Control] von Eberhard Mayer.
+Neben der oben genannten Code-Basis enthält das Programm Teile auf dem von E3DC zur Verfügung gestellten Beispielprogramm sowie 
+einige Codestellen aus dem Tool [E3DC-Control] von Eberhard Mayer.
 
-Dieses Tool setzt die übergebenen Kommandos an das Hauskraftwerk ab und beendet sich danach.  
-
-# Motivation
-
-Die Grundidee bestand darin, den im Winter unausweichlichen (Rest-)Strombezug in die Zeiten zu verlagern, in denen er besonders günstig ist. 
-
-Idealerweise sollte zu diesen Zeiten auch ein Überangebot an Strom aus erneuerbaren Energien vorhanden sein, damit neben dem ökonomischen auch der ökologische Aspekt nicht zu kurz kommt. Stürmisches Herbstwetter kann in diesem Zusammenhang sehr hilfreich sein.
-
- Details dazu sind [hier] in meinem Blogpost zu finden.
 
 # Installation
 
 Zunächst das git Repository klonen mit:
 
 ```sh
-$ git clone https://github.com/mschlappa/e3dcset.git
+$ git clone https://github.com/xc0n42/e3dcset.git
 ```
 In das soeben angelegte Verzeichnis ``e3dcset`` wechseln und die Konfigurationsdatei Datei ``e3dcset.config`` mit einem Editor Deiner Wahl öffnen (z.B. nano)
 
@@ -64,57 +53,42 @@ Nachdem das Kompilieren angeschlossen ist, kann man das Tool ohne Parameter aufr
 Es wird dann eine kleine Hilfe ausgegeben.
 
 Bedeutung der Kürzel:
--(c)harge
--(d)ischarge
--(e)nergy
--(a)utomatic
--(p)ath
+-(m)ode
+-(t)imeout
+-power (v)alue
+-power(s)ave
 
 ```sh
 $ ./e3dcset
 
-Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei]
+Usage: e3dcset [-m mode: 0=auto,1=idle,2=discharge,3=charge,4=grid charge] [-v charge/discharge value] [-t runtime in minutes] [-s 0=powersave off,1=powersave on] [-p Pfad zur Konfigurationsdatei]
 ```
 
-Ladeleistung 2000 Watt / Entladen des Speichers unterbinden mit:
+Power Save Mode einschalten:
 
 ```sh
-$ ./e3dcset -c 2000 -d 1
-Setze LadeLeistung auf 2000W 
-Setze EntladeLeistung auf 1W
+$ ./e3dcset -s 1
 ```
 
-Ladeleistung / Entladeleistung zurück auf Automatik stellen und den Pfad zur Konfigurationsdatei angeben (normalerweise wird im aktuellen Pfad nach der Datei e3dcset.config gesucht):
+Idle Mode für 5 Minuten
+Schaltet die Speicherladung ab und speist bei PV Leistung komplett ins Netz ein
 
 ```sh
-$ ./e3dcset -a -p /home/pi/meine.config
+$ ./e3dcset -m 1 -v 1000 -t 5 -p /home/pi/meine.config
 ```
-Ladeleistung / Entladeleistung zurück auf Automatik stellen und laufende manuelle Speicherladung stoppen:
+
+Charge Mode für 30 Minuten
+Lädt mit max. 800W, Überschuss geht ins Netz. Steht nicht genug PV Leistung zur Verfügung, wird zusätzlich aus dem Netz geladen
 
 ```sh
-$ ./e3dcset -a -e 0
-Setze LadeLeistung auf Automatik
-Manuelles Laden gestoppt
+$ ./e3dcset -m 3 -v 800 -t 30 -p /home/pi/meine.config
 ```
 
-Manuelles Laden des Speichers mit 1 kWh (1000 Wh) starten. 
-Ladeleistung soll 2400 Watt betragen und das Entladen des Speichers soll unterbunden werden:
+Grid charge mode für eine Stunde 
+Lädt mit max. 800W, Überschuss geht ins Netz. Steht nicht genug PV Leistung zur Verfügung, wird zusätzlich aus dem Netz geladen
+(Unterschied zu Mode 3 ist noch unklar)
 
 ```sh
-./e3dcset -c 2400 -d 1 -e 1000
-Setze LadeLeistung auf 2400W 
-Setze EntladeLeistung auf 1W
-Manuelles Laden gestartet
+$ ./e3dcset -m 4 -v 1000 -t 60 -p /home/pi/meine.config
 ```
-
-Hinweise: 
-
-- Wenn nicht genug PV Leistung zur Verfügung steht, wird beim manuelles Laden des Speichers der Strom aus dem Netz bezogen.
-
-
-Viel Spaß beim Ausprobieren!
-
-
-[hier]: https://elektromobilitaet-duelmen.de/2019/11/22/winter-is-coming/   
-[E3DC-Control]: https://github.com/Eba-M/E3DC-Control/  
  

@@ -33,6 +33,12 @@
 #ifndef _AES_H
 #define _AES_H
 
+#ifndef _UINT32_T
+#define _UINT32_T
+typedef unsigned int uint32_t;
+#endif /* _UINT32_T */
+
+
 /* USAGE:
 	1. Create a AES class (or more as necessary)
 	2. Call class method SetParameters
@@ -91,7 +97,7 @@ public:
 	// have enough space in datain and dataout to accomodate this. Pad your data before
 	// calling, preferably using the padding methods listed below.
 	// Decryption must use the same mode as the encryption.
-	void Encrypt(const unsigned char * datain, unsigned char * dataout, unsigned long numBlocks, BlockMode mode = CBC);
+	void Encrypt(const unsigned char * datain, unsigned char * dataout, uint32_t numBlocks, BlockMode mode = CBC);
 
 	// call this before any decryption with the key to use
 	void StartDecryption(const unsigned char * key);
@@ -102,7 +108,7 @@ public:
 	// calling, preferably using the padding methods listed below. You must know the desired
 	// length of the output data, since all the blocks are returned decrypted.
 	// Encryption must use the same mode as the decryption.
-	void Decrypt(const unsigned char * datain, unsigned char * dataout, unsigned long numBlocks, BlockMode mode = CBC);
+	void Decrypt(const unsigned char * datain, unsigned char * dataout, uint32_t numBlocks, BlockMode mode = CBC);
 
 private:
 
