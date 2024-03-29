@@ -174,6 +174,13 @@
 #define TAG_EMS_REQ_ALIVE                                   	0x01050000
 #define TAG_EMS_ALIVE                                       	0x01850000
 #define TAG_EMS_GENERAL_ERROR                               	0x01FFFFFF
+#define TAG_EMS_REQ_GET_IDLE_PERIODS_2                          0x01000033
+#define TAG_EMS_REQ_GET_IDLE_PERIODS_ENABLE                     0x01000035
+#define TAG_EMS_REQ_GET_EP_WALLBOX_PRIORITY                     0x01000037
+#define TAG_EMS_GET_IDLE_PERIODS_2                              0x01800033
+#define TAG_EMS_GET_IDLE_PERIODS_ENABLE                         0x01800035
+#define TAG_EMS_GET_EP_WALLBOX_PRIORITY                         0x01800037
+#define TAG_EMS_GET_EP_WALLBOX_ALLOW 25165864
 
 #define TAG_EMS_REQ_GET_WALLBOX_ENFORCE_POWER_ASSIGNMENT        0x0100027b
 #define TAG_EMS_GET_WALLBOX_ENFORCE_POWER_ASSIGNMENT            0x0180027b
