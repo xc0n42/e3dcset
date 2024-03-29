@@ -175,6 +175,10 @@
 #define TAG_EMS_ALIVE                                       	0x01850000
 #define TAG_EMS_GENERAL_ERROR                               	0x01FFFFFF
 
+#define TAG_EMS_REQ_GET_WALLBOX_ENFORCE_POWER_ASSIGNMENT        0x0100027b
+#define TAG_EMS_GET_WALLBOX_ENFORCE_POWER_ASSIGNMENT            0x0180027b
+#define TAG_EMS_SET_WALLBOX_ENFORCE_POWER_ASSIGNMENT            0x0180027a
+#define TAG_EMS_REQ_SET_WALLBOX_ENFORCE_POWER_ASSIGNMENT        0x0100027a
 
 #define TAG_BAT_REQ_DATA                                    	0x03040000
 #define TAG_BAT_INDEX                                       	0x03040001
