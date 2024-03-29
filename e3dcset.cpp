@@ -30,6 +30,7 @@ typedef struct {
 
 static int iSocket = -1;
 static int iAuthenticated = 0;
+static int iMainRequestSent = 0;
 
 static AES aesEncrypter;
 static AES aesDecrypter;
@@ -40,6 +41,8 @@ static uint8_t ucDecryptionIV[AES_BLOCK_SIZE];
 static int powersave = -1;
 static uint32_t powerValue = -1;
 static uint8_t powerMode = -1;
+static uint8_t wallboxMode = -1;
+static uint8_t WBchar6[6] = {0};
 static time_t timeout = -1;
 static time_t now = time(NULL);
 
@@ -60,7 +63,7 @@ int createRequest(SRscpFrameBuffer * frameBuffer) {
     // Create a request frame
     //---------------------------------------------------------------------------------------------------------
     if(iAuthenticated == 0){
-        DEBUG("Request authentication\n");
+        // printf("Request authentication with user %s\n", e3dc_config.e3dc_user);
         // authentication request
         SRscpValue authenContainer;
         protocol.createContainerValue(&authenContainer, TAG_RSCP_REQ_AUTHENTICATION);
@@ -71,7 +74,7 @@ int createRequest(SRscpFrameBuffer * frameBuffer) {
         // free memory of sub-container as it is now copied to rootValue
         protocol.destroyValueData(authenContainer);
 
-    }else{
+    } else {
 
         if (powerValue >= 0 && powerMode >= 0) {
             switch (powerMode) {
@@ -105,8 +108,33 @@ int createRequest(SRscpFrameBuffer * frameBuffer) {
             protocol.appendValue(&rootValue, SetPowerSettingsContainer);
             protocol.destroyValueData(SetPowerSettingsContainer);
         }
-    	
 
+        if (wallboxMode >= 0) {
+            if (wallboxMode == 0) {
+                WBchar6[0] = 1;
+                printf("Setting wallbox mode: sun\n");
+            } else {
+                WBchar6[0] = 2;
+                printf("Setting wallbox mode: mix\n");
+            }
+            // WBchar6[4] = 1; // Laden stoppen
+            // WBchar6[4] = 0; // Toggle aus
+            // WBchar6[0] = 2; // Netzmodus
+            // WBchar6[0] = 1; // Sonnenmodus
+            // WBchar6[1] = 20; // max. Ladestrom
+            SRscpValue WBContainer;
+            SRscpValue WBExtContainer;
+            protocol.createContainerValue(&WBContainer, TAG_WB_REQ_DATA);
+            protocol.appendValue(&WBContainer, TAG_WB_INDEX, 0);
+            protocol.createContainerValue(&WBExtContainer, TAG_WB_REQ_SET_EXTERN);
+            protocol.appendValue(&WBExtContainer, TAG_WB_EXTERN_DATA_LEN, 6);
+            protocol.appendValue(&WBExtContainer, TAG_WB_EXTERN_DATA, WBchar6, 6);
+            protocol.appendValue(&WBContainer, WBExtContainer);
+            protocol.destroyValueData(WBExtContainer);
+            protocol.appendValue(&rootValue, WBContainer);
+            protocol.destroyValueData(WBContainer);
+        }
+        iMainRequestSent = 1;
     }
 
     // create buffer frame to send data to the S10
@@ -136,7 +164,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         if(ucAccessLevel > 0) {
             iAuthenticated = 1;
         }
-        DEBUG("RSCP authentitication level %i\n", ucAccessLevel);
+        // printf("RSCP authentitication level %i\n", ucAccessLevel);
         break;
     }
     case TAG_EMS_START_MANUAL_CHARGE: {
@@ -170,6 +198,36 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     case TAG_EMS_POWER_ADD: {    // response for TAG_EMS_REQ_POWER_ADD
         int32_t iPower = protocol->getValueAsInt32(response);
         printf("EMS add power meter power is %i W\n", iPower);
+        break;
+    }
+    case TAG_WB_DATA: { // resposne for TAG_WB_REQ_DATA
+        uint8_t ucWBIndex = 0;
+        std::vector<SRscpValue> WBData = protocol->getValueAsContainer(response);
+        for (size_t i = 0; i < WBData.size(); ++i)
+        {
+            if (WBData[i].dataType == RSCP::eTypeError)
+            {
+                // handle error for example access denied errors
+                uint32_t uiErrorCode = protocol->getValueAsUInt32(&WBData[i]);
+                printf("Tag 0x%08X received error code %u.\n", WBData[i].tag, uiErrorCode);
+                return -1;
+            }
+            // check each battery sub tag
+            switch (WBData[i].tag)
+            {
+            case TAG_WB_INDEX:
+            {
+                ucWBIndex = protocol->getValueAsUChar8(&WBData[i]);
+                break;
+            }
+            // ...
+            default:
+                // default behaviour
+                printf("Unknown WB tag %08X\n", response->tag);
+                break;
+            }
+        }
+        protocol->destroyValueData(WBData);
         break;
     }
     case TAG_BAT_DATA: {        // response for TAG_BAT_REQ_DATA
@@ -222,65 +280,66 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         }
         protocol->destroyValueData(batteryData);
         break;
-       }
+    }
 
-        case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
-            uint8_t ucPMIndex = 0;
-            std::vector<SRscpValue> PMData = protocol->getValueAsContainer(response);
-            for(size_t i = 0; i < PMData.size(); ++i) {
-                if(PMData[i].dataType == RSCP::eTypeError) {
-                    // handle error for example access denied errors
-                    uint32_t uiErrorCode = protocol->getValueAsUInt32(&PMData[i]);
-                    printf("TAG_EMS_GET_POWER_SETTINGS 0x%08X received error code %u.\n", PMData[i].tag, uiErrorCode);
-                    return -1;
-                }
-                // check each PM sub tag
-                switch(PMData[i].tag) {
-                    case TAG_PM_INDEX: {
-                        ucPMIndex = protocol->getValueAsUChar8(&PMData[i]);
-                        break;
-                    }
-                    case TAG_EMS_POWER_LIMITS_USED: {              // response for POWER_LIMITS_USED
-                        if (protocol->getValueAsBool(&PMData[i])){
-                            printf("POWER_LIMITS_USED\n");
-                            }
-                        break;
-                    }
-                    case TAG_EMS_MAX_CHARGE_POWER: {              // 101 response for TAG_EMS_MAX_CHARGE_POWER
-                        uint32_t uPower = protocol->getValueAsUInt32(&PMData[i]);
-                        printf("MAX_CHARGE_POWER %i W\n", uPower);
-                        break;
-                    }
-                    case TAG_EMS_MAX_DISCHARGE_POWER: {              //102 response for TAG_EMS_MAX_DISCHARGE_POWER
-                        uint32_t uPower = protocol->getValueAsUInt32(&PMData[i]);
-                        printf("MAX_DISCHARGE_POWER %i W\n", uPower);
-                        break;
-                    }
-                    case TAG_EMS_DISCHARGE_START_POWER:{              //103 response for TAG_EMS_DISCHARGE_START_POWER
-                        uint32_t uPower = protocol->getValueAsUInt32(&PMData[i]);
-                        printf("DISCHARGE_START_POWER %i W\n", uPower);
-                        break;
-                    }
-                    case TAG_EMS_POWERSAVE_ENABLED: {              //104 response for TAG_EMS_POWERSAVE_ENABLED
-                        if (protocol->getValueAsBool(&PMData[i])){
-                            printf("POWERSAVE_ENABLED\n");
-                        }
-                        break;
-                    }
-                    case TAG_EMS_WEATHER_REGULATED_CHARGE_ENABLED: {//105 resp WEATHER_REGULATED_CHARGE_ENABLED
-                        if (protocol->getValueAsBool(&PMData[i])){
-                            printf("WEATHER_REGULATED_CHARGE_ENABLED\n");
-                        }
-                        break;
-                    }
-                        // ...
-                    default:
-                        // default behaviour
-                        break;
-                }
+    case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
+        uint8_t ucPMIndex = 0;
+        std::vector<SRscpValue> PMData = protocol->getValueAsContainer(response);
+        for(size_t i = 0; i < PMData.size(); ++i) {
+            if(PMData[i].dataType == RSCP::eTypeError) {
+                // handle error for example access denied errors
+                uint32_t uiErrorCode = protocol->getValueAsUInt32(&PMData[i]);
+                printf("TAG_EMS_GET_POWER_SETTINGS 0x%08X received error code %u.\n", PMData[i].tag, uiErrorCode);
+                return -1;
             }
-            protocol->destroyValueData(PMData);
-            break;
+            // check each PM sub tag
+            switch(PMData[i].tag) {
+                case TAG_PM_INDEX: {
+                    ucPMIndex = protocol->getValueAsUChar8(&PMData[i]);
+                    break;
+                }
+                case TAG_EMS_POWER_LIMITS_USED: {              // response for POWER_LIMITS_USED
+                    if (protocol->getValueAsBool(&PMData[i])){
+                        printf("POWER_LIMITS_USED\n");
+                        }
+                    break;
+                }
+                case TAG_EMS_MAX_CHARGE_POWER: {              // 101 response for TAG_EMS_MAX_CHARGE_POWER
+                    uint32_t uPower = protocol->getValueAsUInt32(&PMData[i]);
+                    printf("MAX_CHARGE_POWER %i W\n", uPower);
+                    break;
+                }
+                case TAG_EMS_MAX_DISCHARGE_POWER: {              //102 response for TAG_EMS_MAX_DISCHARGE_POWER
+                    uint32_t uPower = protocol->getValueAsUInt32(&PMData[i]);
+                    printf("MAX_DISCHARGE_POWER %i W\n", uPower);
+                    break;
+                }
+                case TAG_EMS_DISCHARGE_START_POWER:{              //103 response for TAG_EMS_DISCHARGE_START_POWER
+                    uint32_t uPower = protocol->getValueAsUInt32(&PMData[i]);
+                    printf("DISCHARGE_START_POWER %i W\n", uPower);
+                    break;
+                }
+                case TAG_EMS_POWERSAVE_ENABLED: {              //104 response for TAG_EMS_POWERSAVE_ENABLED
+                    if (protocol->getValueAsBool(&PMData[i])){
+                        printf("POWERSAVE_ENABLED\n");
+                    }
+                    break;
+                }
+                case TAG_EMS_WEATHER_REGULATED_CHARGE_ENABLED: {//105 resp WEATHER_REGULATED_CHARGE_ENABLED
+                    if (protocol->getValueAsBool(&PMData[i])){
+                        printf("WEATHER_REGULATED_CHARGE_ENABLED\n");
+                    }
+                    break;
+                }
+                    // ...
+                default:
+                    // default behaviour
+                    break;
+            }
+        }
+        protocol->destroyValueData(PMData);
+        break;
+        
 
     }
     // ...
@@ -445,6 +504,7 @@ static void mainLoop(void)
         memset(&frameBuffer, 0, sizeof(frameBuffer));
 
         // create an RSCP frame with requests to some example data
+        // printf ("Creating request ...\n");
         createRequest(&frameBuffer);
 
         // check that frame data was created
@@ -477,7 +537,9 @@ static void mainLoop(void)
                     (now + (timeout*60) < time(NULL)) ||
                     (timeout == -1 && counter > 0)
                 ) {
-                    bStopExecution = true;
+                    if (iMainRequestSent == 1 || time(NULL) - now > 10) { // max 10s um nach der Auth, den Hauptrequest zu senden
+                        bStopExecution = true;
+                    }
                 }
             }
         }
@@ -485,15 +547,17 @@ static void mainLoop(void)
         protocol.destroyFrameData(&frameBuffer);
 
         // main loop sleep / cycle time before next request
-        sleep(5);
+        if (iMainRequestSent == 1 && timeout >= 1) {
+            sleep(5);
+        } // ansonsten direkt nach dem Auth weiter
 
-	    counter++;
+        counter++;
 
     }
 }
 
 void usage(void){
-    fprintf(stderr, "\n   Usage: e3dcset [-m mode: 0=auto,1=idle,2=discharge,3=charge,4=grid charge] [-v charge/discharge value] [-t runtime in minutes] [-s 0=powersave off,1=powersave on] [-p Pfad zur Konfigurationsdatei]\n\n");
+    fprintf(stderr, "\n   Usage: e3dcset [-m mode: 0=auto,1=idle,2=discharge,3=charge,4=grid charge] [-w mode: 0=sun,1=mix] [-v charge/discharge value] [-t runtime in minutes] [-s 0=powersave off,1=powersave on] [-p Pfad zur Konfigurationsdatei]\n\n");
     exit(EXIT_FAILURE);
 }
 
@@ -629,7 +693,7 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "m:p:v:t:s:")) != -1) {
+    while ((opt = getopt(argc, argv, "m:w:p:v:t:s:")) != -1) {
 
     	switch (opt) {
             case 't':
@@ -637,6 +701,10 @@ int main(int argc, char *argv[])
                 break;
             case 'm':
                 powerMode = atoi(optarg);
+                break;
+            case 'w':
+                wallboxMode = atoi(optarg);
+                timeout = -1;
                 break;
             case 'v':
                 powerValue = atoi(optarg);
